@@ -7,61 +7,58 @@ struct HomeView: View {
     @EnvironmentObject var store: Store
 
     @State private var showSettings = false
-    @State private var showPro = false
+    @State private var showPaywall = false
+    @State private var showInsights = false
 
     var body: some View {
         NavigationStack {
             ZStack {
                 QMBackground()
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Today's card
-                        GridView()
-                            .environmentObject(appModel)
-                            .environmentObject(store)
-
-                        // Stats row
-                        HStack(spacing: 12) {
-                            MetricTile(value: "\(appModel.streak.current)", label: "Streak")
-                            MetricTile(value: "\(appModel.streak.best)", label: "Best")
-                            MetricTile(
-                                value: appModel.today.map { "\($0.winCount)/3" } ?? "–",
-                                label: "Today"
-                            )
-                        }
-                        .padding(.horizontal)
-
-                        // Pro history tile
+                VStack(spacing: 24) {
+                    // Streak bar
+                    HStack(spacing: 16) {
+                        MetricTile(
+                            value: "\(appModel.currentStreak)",
+                            label: "streak"
+                        )
+                        MetricTile(
+                            value: "\(appModel.bestStreak)",
+                            label: "best"
+                        )
                         Button {
-                            Haptics.tap()
-                            showPro = true
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("History & Insights")
-                                        .font(.headline)
-                                    Text("See every past day's wins")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: store.isPro ? "chevron.right" : "lock.fill")
-                                    .foregroundStyle(Color.qmAccent)
+                            if store.isPro {
+                                showInsights = true
+                            } else {
+                                showPaywall = true
                             }
-                            .qmCard()
-                            .padding(.horizontal)
+                        } label: {
+                            VStack(spacing: 4) {
+                                Text(store.isPro ? "\(appModel.completedThings.count)" : "PRO")
+                                    .font(.title2.weight(.bold))
+                                    .foregroundStyle(store.isPro ? .primary : Color.qmAccent)
+                                    .lineLimit(1).minimumScaleFactor(0.6)
+                                Text("history")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.qmCard, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(.vertical)
+                    .padding(.horizontal, 20)
+
+                    Spacer()
+                    GridView()
+                    Spacer()
                 }
             }
-            .navigationTitle("Threes")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("Onefocus")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Haptics.tap()
                         showSettings = true
                     } label: {
                         Image(systemName: "gearshape")
@@ -74,25 +71,28 @@ struct HomeView: View {
                     .environmentObject(store)
                     .environmentObject(appModel)
             }
-            .sheet(isPresented: $showPro) {
-                if store.isPro {
-                    InsightsView()
-                        .environmentObject(appModel)
-                        .environmentObject(store)
-                } else {
-                    PaywallView()
-                        .environmentObject(store)
-                }
+            .sheet(isPresented: $showPaywall) {
+                PaywallView()
+                    .environmentObject(store)
+            }
+            .sheet(isPresented: $showInsights) {
+                InsightsView()
+                    .environmentObject(appModel)
+                    .environmentObject(store)
+            }
+            .onAppear {
+                handleForceScreen()
             }
         }
-        .onAppear {
-            if let screen = forceScreen {
-                switch screen {
-                case "pro": showPro = true
-                case "settings": showSettings = true
-                default: break
-                }
-            }
+    }
+
+    private func handleForceScreen() {
+        guard let screen = forceScreen else { return }
+        switch screen {
+        case "paywall": showPaywall = true
+        case "insights": showInsights = true
+        case "settings": showSettings = true
+        default: break
         }
     }
 }

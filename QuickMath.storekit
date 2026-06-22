@@ -9,7 +9,7 @@
       }
     ]
   },
-  "identifier": "LATTICE_STOREKIT_CONFIG",
+  "identifier": "ONEFOCUS_STOREKIT_CONFIG",
   "nonRenewingSubscriptions": [],
   "products": [],
   "settings": {
@@ -18,9 +18,9 @@
   },
   "subscriptionGroups": [
     {
-      "id": "threes_pro_group",
+      "id": "onefocus_pro_group",
       "localizations": [],
-      "name": "Threes Pro",
+      "name": "Onefocus Pro",
       "subscriptions": [
         {
           "adHocOffers": [],
@@ -28,19 +28,19 @@
           "displayPrice": "0.99",
           "familyShareable": false,
           "groupNumber": 1,
-          "internalID": "threes_pro_monthly_id",
+          "internalID": "onefocus_pro_monthly_id",
           "introductoryOffer": null,
           "localizations": [
             {
-              "description": "History, rollover suggestions & daily reminders.",
-              "displayName": "Threes Pro",
+              "description": "History, reflections & daily reminders.",
+              "displayName": "Onefocus Pro",
               "locale": "en_US"
             }
           ],
-          "productID": "threes_pro_monthly",
+          "productID": "onefocus_pro_monthly",
           "recurringSubscriptionPeriod": "P1M",
-          "referenceName": "Threes Pro Monthly",
-          "subscriptionGroupID": "threes_pro_group",
+          "referenceName": "Onefocus Pro Monthly",
+          "subscriptionGroupID": "onefocus_pro_group",
           "type": "RecurringSubscription"
         }
       ]

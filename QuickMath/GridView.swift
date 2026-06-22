@@ -1,153 +1,219 @@
 import SwiftUI
 
-/// The primary entry/action screen: shows today's three priority slots.
 struct GridView: View {
     @EnvironmentObject var appModel: AppModel
     @EnvironmentObject var store: Store
 
-    @FocusState private var focusedSlot: Int?
-
-    private var slots: [TaskSlot] {
-        (appModel.today?.slots ?? []).sorted { $0.order < $1.order }
-    }
+    @State private var inputTitle: String = ""
+    @State private var inputWhy: String = ""
+    @State private var isEditing: Bool = false
+    @State private var showWhyField: Bool = false
+    @FocusState private var titleFocused: Bool
+    @FocusState private var whyFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(dateLabel)
+        VStack(spacing: 0) {
+            if let thing = appModel.todayThing {
+                existingThingView(thing)
+            } else {
+                setThingView
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Already set a thing today
+
+    private func existingThingView(_ thing: OneThing) -> some View {
+        VStack(spacing: 20) {
+            Text("Today's one thing")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text(thing.title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !thing.why.isEmpty && store.isPro {
+                    Text(thing.why)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text("Your three.")
-                        .font(.title2.weight(.bold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
-                // Day result badge
-                if let today = appModel.today, today.hasAnyTitle {
-                    dayBadge(today: today)
-                }
-            }
 
-            Divider()
-
-            // Three task slots
-            ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
-                SlotRow(
-                    slot: slot,
-                    number: index + 1,
-                    isFocused: focusedSlot == index,
-                    onTitleChange: { newTitle in
-                        appModel.setTitle(newTitle, slot: slot)
-                    },
-                    onToggle: {
-                        appModel.toggleDone(slot)
-                    }
-                )
-                .focused($focusedSlot, equals: index)
-
-                if index < 2 {
-                    Divider().padding(.leading, 44)
-                }
-            }
-
-            // Dismiss keyboard hint
-            if focusedSlot != nil {
-                HStack {
-                    Spacer()
-                    Button("Done") {
-                        focusedSlot = nil
-                    }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.qmAccent)
-                }
-            }
-        }
-        .qmCard()
-        .padding(.horizontal)
-    }
-
-    // MARK: - Helpers
-
-    private var dateLabel: String {
-        let fmt = DateFormatter()
-        fmt.dateStyle = .full
-        fmt.timeStyle = .none
-        return fmt.string(from: Date())
-    }
-
-    @ViewBuilder
-    private func dayBadge(today: DailyThree) -> some View {
-        let wins = today.winCount
-        Group {
-            if today.isPerfect {
-                Label("Won the day!", systemImage: "checkmark.seal.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.qmCorrect)
-            } else if wins > 0 {
-                Text("\(wins) of 3")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Get started")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color.qmCard2, in: Capsule())
-    }
-}
-
-// MARK: - SlotRow
-
-private struct SlotRow: View {
-    let slot: TaskSlot
-    let number: Int
-    let isFocused: Bool
-    let onTitleChange: (String) -> Void
-    let onToggle: () -> Void
-
-    @State private var localTitle: String = ""
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // Number + check button
-            Button(action: onToggle) {
-                ZStack {
-                    Circle()
-                        .stroke(slot.done ? Color.qmAccent : Color.qmHair, lineWidth: 2)
-                        .frame(width: 32, height: 32)
-                    if slot.done {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Color.qmAccent)
-                    } else {
-                        Text("\(number)")
-                            .font(.caption.weight(.semibold))
+                if thing.done, let doneAt = thing.doneAt {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.qmCorrect)
+                        Text("Done at \(doneAt, format: .dateTime.hour().minute())")
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
                 }
             }
-            .buttonStyle(.plain)
-            .disabled(slot.title.isEmpty)
+            .qmCard()
 
-            // Title field
-            TextField("Priority \(number)", text: $localTitle, axis: .vertical)
-                .font(.body)
-                .lineLimit(1...3)
-                .strikethrough(slot.done, color: .secondary)
-                .foregroundStyle(slot.done ? .secondary : .primary)
-                .onAppear { localTitle = slot.title }
-                .onChange(of: localTitle) { _, newVal in
-                    onTitleChange(newVal)
+            if !thing.done {
+                Button {
+                    appModel.markDone()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark")
+                        Text("Mark Done")
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .onChange(of: slot.title) { _, newVal in
-                    if newVal != localTitle { localTitle = newVal }
+                .prominentButton()
+
+                Button {
+                    inputTitle = thing.title
+                    inputWhy = thing.why
+                    isEditing = true
+                } label: {
+                    Text("Change focus")
+                        .frame(maxWidth: .infinity)
                 }
+                .softButton()
+            } else {
+                VStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.qmCorrect)
+                            .font(.title3)
+                        Text("Focus complete.")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                    }
+                    Text("Tomorrow's focus starts fresh.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .qmCard()
+            }
+
+            if isEditing {
+                editingView
+            }
         }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
+    }
+
+    // MARK: - No thing set yet
+
+    private var setThingView: some View {
+        VStack(spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("What's your one thing today?")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text("One task. Fully done before anything else.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(spacing: 12) {
+                TextField("My one thing is…", text: $inputTitle, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(3, reservesSpace: false)
+                    .padding(14)
+                    .background(Color.qmField, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .focused($titleFocused)
+
+                if store.isPro {
+                    if showWhyField {
+                        TextField("Why does this matter? (optional)", text: $inputWhy, axis: .vertical)
+                            .font(.body)
+                            .lineLimit(3, reservesSpace: false)
+                            .padding(14)
+                            .background(Color.qmField, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .focused($whyFocused)
+                    } else {
+                        Button {
+                            showWhyField = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                whyFocused = true
+                            }
+                        } label: {
+                            Text("+ Add why (optional)")
+                                .font(.subheadline)
+                                .foregroundStyle(Color.qmAccent)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+
+            Button {
+                let trimmed = inputTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                appModel.setTodayThing(title: trimmed, why: inputWhy.trimmingCharacters(in: .whitespacesAndNewlines))
+                inputTitle = ""
+                inputWhy = ""
+                showWhyField = false
+                titleFocused = false
+            } label: {
+                Text("Set My Focus")
+                    .frame(maxWidth: .infinity)
+            }
+            .prominentButton()
+            .disabled(inputTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .opacity(inputTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.5 : 1)
+        }
+    }
+
+    // MARK: - Editing overlay
+
+    private var editingView: some View {
+        VStack(spacing: 12) {
+            Divider()
+            Text("Change your focus")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            TextField("New focus…", text: $inputTitle, axis: .vertical)
+                .font(.body)
+                .lineLimit(3, reservesSpace: false)
+                .padding(14)
+                .background(Color.qmField, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            if store.isPro {
+                TextField("Why? (optional)", text: $inputWhy, axis: .vertical)
+                    .font(.body)
+                    .lineLimit(2, reservesSpace: false)
+                    .padding(14)
+                    .background(Color.qmField, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    isEditing = false
+                    inputTitle = ""
+                    inputWhy = ""
+                } label: {
+                    Text("Cancel")
+                        .frame(maxWidth: .infinity)
+                }
+                .softButton()
+
+                Button {
+                    let trimmed = inputTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    appModel.setTodayThing(title: trimmed, why: inputWhy.trimmingCharacters(in: .whitespacesAndNewlines))
+                    inputTitle = ""
+                    inputWhy = ""
+                    isEditing = false
+                } label: {
+                    Text("Update")
+                        .frame(maxWidth: .infinity)
+                }
+                .prominentButton()
+                .disabled(inputTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
     }
 }

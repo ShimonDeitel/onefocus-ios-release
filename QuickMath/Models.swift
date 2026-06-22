@@ -4,45 +4,46 @@ import SwiftData
 // MARK: - SwiftData Models
 
 @Model
-final class DailyThree {
-    @Attribute(.unique) var date: Date
-    var slots: [TaskSlot]
+final class OneThing {
+    var id: UUID
+    var date: Date
+    var title: String
+    var why: String
+    var done: Bool
+    var doneAt: Date?
 
-    init(date: Date) {
-        self.date = Calendar.current.startOfDay(for: date)
-        self.slots = [
-            TaskSlot(order: 0),
-            TaskSlot(order: 1),
-            TaskSlot(order: 2)
-        ]
+    init(date: Date = Date(), title: String, why: String = "") {
+        self.id = UUID()
+        self.date = date
+        self.title = title
+        self.why = why
+        self.done = false
+        self.doneAt = nil
     }
-
-    var winCount: Int { slots.filter { $0.done }.count }
-    var isPerfect: Bool { winCount == 3 }
-    var hasAnyTitle: Bool { slots.contains { !$0.title.isEmpty } }
 }
 
 @Model
-final class TaskSlot {
-    var id: UUID
-    var title: String
-    var done: Bool
-    var order: Int
+final class FocusStreak {
+    var current: Int
+    var best: Int
+    var lastDoneDate: Date?
 
-    init(order: Int) {
-        self.id = UUID()
-        self.title = ""
-        self.done = false
-        self.order = order
+    init() {
+        self.current = 0
+        self.best = 0
+        self.lastDoneDate = nil
     }
 }
 
-// MARK: - Streak (value type, computed on the fly)
+@Model
+final class Prefs {
+    var askHour: Int
+    var theme: String
 
-struct StreakInfo {
-    var current: Int
-    var best: Int
-    var lastPerfectDate: Date?
+    init() {
+        self.askHour = 9
+        self.theme = "system"
+    }
 }
 
 // MARK: - AppModel
@@ -52,9 +53,10 @@ final class AppModel: ObservableObject {
     let container: ModelContainer
     weak var store: Store?
 
-    @Published private(set) var today: DailyThree?
-    @Published private(set) var history: [DailyThree] = []
-    @Published private(set) var streak: StreakInfo = StreakInfo(current: 0, best: 0, lastPerfectDate: nil)
+    @Published private(set) var todayThing: OneThing?
+    @Published private(set) var completedThings: [OneThing] = []
+    @Published private(set) var currentStreak: Int = 0
+    @Published private(set) var bestStreak: Int = 0
 
     init(container: ModelContainer) {
         self.container = container
@@ -62,135 +64,105 @@ final class AppModel: ObservableObject {
     }
 
     static func makeContainer() -> ModelContainer {
-        let schema = Schema([DailyThree.self, TaskSlot.self])
+        let schema = Schema([OneThing.self, FocusStreak.self, Prefs.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            let cfg = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-            return try ModelContainer(for: schema, configurations: [cfg])
+            return try ModelContainer(for: schema, configurations: [config])
         } catch {
-            let cfg = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-            return (try? ModelContainer(for: schema, configurations: [cfg]))!
+            let fallback = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            return try! ModelContainer(for: schema, configurations: [fallback])
         }
     }
 
     func reload() {
         let ctx = container.mainContext
-        let todayStart = Calendar.current.startOfDay(for: Date())
+        let today = Calendar.current.startOfDay(for: Date())
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
 
-        // Fetch or create today's DailyThree
-        let todayPred = #Predicate<DailyThree> { $0.date == todayStart }
-        let todayFetch = FetchDescriptor<DailyThree>(predicate: todayPred)
-        if let existing = try? ctx.fetch(todayFetch), let first = existing.first {
-            today = first
-        } else {
-            let newDay = DailyThree(date: Date())
-            ctx.insert(newDay)
-            try? ctx.save()
-            today = newDay
-        }
+        let allThings = (try? ctx.fetch(FetchDescriptor<OneThing>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        todayThing = allThings.first(where: { $0.date >= today && $0.date < tomorrow })
+        completedThings = allThings.filter { $0.done }.sorted { ($0.doneAt ?? $0.date) > ($1.doneAt ?? $1.date) }
 
-        // Fetch full history sorted descending
-        var descriptor = FetchDescriptor<DailyThree>(sortBy: [SortDescriptor(\.date, order: .reverse)])
-        descriptor.fetchLimit = 365
-        history = (try? ctx.fetch(descriptor)) ?? []
-
-        streak = computeStreak()
+        let streaks = (try? ctx.fetch(FetchDescriptor<FocusStreak>())) ?? []
+        let s = streaks.first ?? {
+            let ns = FocusStreak()
+            ctx.insert(ns)
+            return ns
+        }()
+        currentStreak = s.current
+        bestStreak = s.best
     }
 
     func refresh() { reload() }
 
-    // MARK: - Task operations
+    // MARK: - Business Logic
 
-    func setTitle(_ title: String, slot: TaskSlot) {
-        slot.title = title
-        save()
-    }
+    func setTodayThing(title: String, why: String = "") {
+        let ctx = container.mainContext
+        let today = Calendar.current.startOfDay(for: Date())
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
 
-    func toggleDone(_ slot: TaskSlot) {
-        guard !slot.title.isEmpty else { return }
-        slot.done.toggle()
-        if slot.done { Haptics.success() } else { Haptics.tap() }
-        save()
-        streak = computeStreak()
-    }
-
-    func clearToday() {
-        guard let t = today else { return }
-        for slot in t.slots {
-            slot.title = ""
-            slot.done = false
+        // Remove any existing today thing
+        let existing = (try? ctx.fetch(FetchDescriptor<OneThing>())) ?? []
+        for thing in existing where thing.date >= today && thing.date < tomorrow {
+            ctx.delete(thing)
         }
-        save()
+
+        let newThing = OneThing(date: Date(), title: title, why: why)
+        ctx.insert(newThing)
+        try? ctx.save()
+        reload()
+        Haptics.tap()
     }
 
-    // MARK: - History helpers
-
-    func winRate(days: Int) -> Double {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-        let recent = history.filter { $0.date >= cutoff && $0.hasAnyTitle }
-        guard !recent.isEmpty else { return 0 }
-        let perfectDays = recent.filter { $0.isPerfect }.count
-        return Double(perfectDays) / Double(recent.count)
+    func markDone() {
+        guard let thing = todayThing, !thing.done else { return }
+        thing.done = true
+        thing.doneAt = Date()
+        try? container.mainContext.save()
+        updateStreak()
+        reload()
+        Haptics.success()
     }
 
-    // MARK: - Delete all
+    private func updateStreak() {
+        let ctx = container.mainContext
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+
+        let streaks = (try? ctx.fetch(FetchDescriptor<FocusStreak>())) ?? []
+        let s = streaks.first ?? {
+            let ns = FocusStreak()
+            ctx.insert(ns)
+            return ns
+        }()
+
+        if let last = s.lastDoneDate {
+            let lastDay = cal.startOfDay(for: last)
+            let diff = cal.dateComponents([.day], from: lastDay, to: today).day ?? 0
+            if diff == 1 {
+                s.current += 1
+            } else if diff > 1 {
+                s.current = 1
+            }
+            // diff == 0 means same day, no change
+        } else {
+            s.current = 1
+        }
+        s.lastDoneDate = today
+        if s.current > s.best { s.best = s.current }
+        try? ctx.save()
+    }
 
     func deleteAllData() {
         let ctx = container.mainContext
-        for day in history { ctx.delete(day) }
+        let things = (try? ctx.fetch(FetchDescriptor<OneThing>())) ?? []
+        for t in things { ctx.delete(t) }
+        let streaks = (try? ctx.fetch(FetchDescriptor<FocusStreak>())) ?? []
+        for s in streaks { ctx.delete(s) }
+        let prefs = (try? ctx.fetch(FetchDescriptor<Prefs>())) ?? []
+        for p in prefs { ctx.delete(p) }
         try? ctx.save()
-        today = nil
-        history = []
-        streak = StreakInfo(current: 0, best: 0, lastPerfectDate: nil)
         reload()
-    }
-
-    // MARK: - Private
-
-    private func save() {
-        try? container.mainContext.save()
-    }
-
-    private func computeStreak() -> StreakInfo {
-        let cal = Calendar.current
-        // Sort ascending for streak walk
-        let sorted = history.filter { $0.hasAnyTitle }.sorted { $0.date < $1.date }
-        var current = 0
-        var best = 0
-        var lastPerfect: Date?
-
-        var streak = 0
-        for (i, day) in sorted.enumerated() {
-            if day.isPerfect {
-                if i == 0 {
-                    streak = 1
-                } else {
-                    let prev = sorted[i - 1]
-                    let diff = cal.dateComponents([.day], from: prev.date, to: day.date).day ?? 99
-                    streak = (prev.isPerfect && diff == 1) ? streak + 1 : 1
-                }
-                lastPerfect = day.date
-                best = max(best, streak)
-            } else {
-                streak = 0
-            }
-        }
-
-        // Current streak: count back from today
-        let todayStart = cal.startOfDay(for: Date())
-        var cur = 0
-        var checkDate = todayStart
-        for day in sorted.reversed() {
-            let diff = cal.dateComponents([.day], from: day.date, to: checkDate).day ?? 99
-            if diff > 1 { break }
-            if day.isPerfect {
-                cur += 1
-                checkDate = day.date
-            } else {
-                break
-            }
-        }
-        current = cur
-
-        return StreakInfo(current: current, best: best, lastPerfectDate: lastPerfect)
     }
 }
